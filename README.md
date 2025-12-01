@@ -106,11 +106,39 @@ uv run python -m src.preprocessing.csv_feature_freq_analyzer
 - Forward-fill for quarterly/monthly data propagation
 - Z-score normalization
 - One-hot encoded labels with configurable return bins
+- Feature selection with glob patterns
 
 **Usage:**
 
 ```bash
 uv run python -m src.preprocessing.stock_dataset_builder
+```
+
+**Feature Selection Examples:**
+
+```python
+# Select only specific stocks
+builder = StockDatasetBuilder(
+    feature_columns=["MSFT_*", "AAPL_*", "SPY_*"]
+)
+
+# Select only price and volume features
+builder = StockDatasetBuilder(
+    feature_columns=["*_PX_LAST", "*_PX_VOLUME"]
+)
+
+# Select only macro indicators
+builder = StockDatasetBuilder(
+    feature_columns=["INDICATORS_*"]
+)
+
+# Exclude quarterly features (reduce data sparsity)
+builder = StockDatasetBuilder(
+    feature_columns=["*_PX_*", "*_VOL_*", "INDICATORS_*"]  # No quarterly fundamentals
+)
+
+# Default behavior - use all 237 features
+builder = StockDatasetBuilder()  # feature_columns=None
 ```
 
 ---
@@ -207,14 +235,104 @@ The pipeline automatically:
 
 ---
 
-## Next Steps
+## Model Training
 
-After preprocessing, the dataset is ready for model training:
+### CNN-BiLSTM Architecture
 
-1. Load arrays: `X = np.load('datasets/npy/msft_10day_prediction_X.npy')`
-2. Build CNN-1D + BiLSTM model
-3. Train with appropriate loss function (categorical crossentropy)
-4. Evaluate on validation set
+The model implements a hybrid deep learning architecture:
+
+**Architecture:**
+
+1. **CNN Layers (2x)**: Extract temporal patterns from sequences
+   - 32 filters → 64 filters
+   - BatchNormalization + ReLU + Dropout (0.2)
+2. **BiLSTM Layer**: Capture bidirectional temporal dependencies
+   - 64 hidden units per direction (128 total)
+   - Dropout (0.2)
+3. **Attention Mechanism**: Focus on important time steps
+4. **Dense Layers**: Classification head
+   - 64 units → 12 classes (softmax)
+
+**Input:** `(batch, 60, 237)` - 60 days of 237 features
+**Output:** `(batch, 12)` - Probabilities for 12 return bins
+
+### Training the Model
+
+```bash
+# Train model with default configuration
+uv run python -m model.train
+```
+
+**Training Features:**
+
+- Automatic train/val/test split (70%/15%/10%)
+- 5 samples reserved for local testing
+- Mixed precision training (FP16)
+- Early stopping (patience=15)
+- Learning rate scheduling (ReduceLROnPlateau)
+- Gradient clipping
+- TensorBoard logging
+
+**Outputs:**
+
+- Model checkpoints: `model/checkpoints/`
+- Training logs: `model/logs/`
+- Data splits: `datasets/npy/train_*.npy`, `val_*.npy`, `test_*.npy`
+
+### Monitoring Training
+
+View training progress with TensorBoard:
+
+```bash
+tensorboard --logdir model/logs
+```
+
+Open http://localhost:6006 to see:
+
+- Training/validation loss curves
+- Accuracy and F1-score metrics
+- Learning rate schedule
+- Model graph
+
+### Model Evaluation
+
+```python
+from src.model.utils import load_model, evaluate_model
+import numpy as np
+
+# Load trained model
+model = load_model("model/checkpoints/best_model.ckpt")
+
+# Load test data
+X_test = np.load("datasets/npy/test_X.npy")
+y_test = np.load("datasets/npy/test_y.npy")
+
+# Evaluate
+results = evaluate_model(
+    model, X_test, y_test,
+    save_dir="model/evaluation"
+)
+```
+
+### Making Predictions
+
+```python
+from src.model.utils import load_model, predict_sample
+import numpy as np
+
+# Load model
+model = load_model("model/checkpoints/best_model.ckpt")
+
+# Load local test sample
+X_local = np.load("datasets/npy/local_test_X.npy")
+
+# Predict
+prediction = predict_sample(model, X_local[0])
+
+print(f"Predicted class: {prediction['predicted_class']}")
+print(f"Confidence: {prediction['confidence']:.4f}")
+print(f"Expected return: {prediction['interpretation']}")
+```
 
 ---
 

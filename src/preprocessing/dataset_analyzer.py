@@ -112,6 +112,7 @@ class DatasetAnalyzer:
         result = pd.DataFrame(correlations)
         if len(result) > 0:
             result = result.sort_values('correlation', ascending=False)
+            # result = result.sort_values('correlation')
         
         return result
     

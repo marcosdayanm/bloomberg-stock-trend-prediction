@@ -2,6 +2,7 @@ import pandas as pd
 import numpy as np
 from pathlib import Path
 import pandas_market_calendars as mcal
+from fnmatch import fnmatch
 
 from src.constants import CRUDE_DATASETS_DIR, DATASETS_DIR
 from src.preprocessing.dataset_analyzer import DatasetAnalyzer
@@ -16,15 +17,17 @@ class StockDatasetBuilder:
         horizon: int = 10,
         return_bins: list[float] = [-np.inf, -2, -1, 0, 1, 2, np.inf],
         start_date: str = "2000-01-03",
-        end_date: str = "2025-11-20"
+        end_date: str = "2025-11-20",
+        feature_columns: list[str] | None = None,
     ):
+        """Initialize the dataset builder.
         """
-        Initialize the dataset builder."""
         self.sequence_length = sequence_length
         self.horizon = horizon
         self.return_bins = return_bins
         self.start_date = start_date
         self.end_date = end_date
+        self.feature_columns = feature_columns
         
         self.df: pd.DataFrame | None = None
         self.feature_cols: list[str] = []
@@ -122,6 +125,24 @@ class StockDatasetBuilder:
         
         exclude_cols = ['date', 'label'] + [col for col in df.columns if col.startswith('label_')]
         feature_cols = [col for col in df.columns if col not in exclude_cols and df[col].dtype in [np.float64, np.int64]]
+        
+        # Apply feature selection if specified
+        if self.feature_columns is not None:
+            selected_features = []
+            for pattern in self.feature_columns:
+                matched = [col for col in feature_cols if fnmatch(col, pattern)]
+                selected_features.extend(matched)
+            
+            # Remove duplicates while preserving order
+            feature_cols = list(dict.fromkeys(selected_features))
+            
+            if len(feature_cols) == 0:
+                raise ValueError(
+                    f"No features matched the patterns: {self.feature_columns}\n"
+                    f"Available features: {df.columns.tolist()[:20]}..."
+                )
+            
+            print(f"  Feature selection applied: {len(feature_cols)} features selected from patterns {self.feature_columns}")
         
         label_cols = [col for col in df.columns if col.startswith('label_')]
         df_clean = df[['date'] + feature_cols + ['label'] + label_cols].copy()

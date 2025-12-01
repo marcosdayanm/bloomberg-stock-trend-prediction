@@ -218,3 +218,10 @@ crude-datasets/
 
 # Any jupyter notebook file
 *.ipynb
+
+
+# Training checkpoints
+checkpoints/
+
+# Logs
+logs/

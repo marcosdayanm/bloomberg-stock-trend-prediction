@@ -103,7 +103,7 @@ class BloombergExcelParser:
                 print(f"[WARNING] Sheet '{sheet}' does not match the pattern.")
                 continue
 
-            base = sheet.replace(" ", "_")  # type: ignore
+            base = sheet.replace(" ", "_").replace("_CRUDE", "")  # type: ignore
             csv_path = out_dir / f"{base}.csv"
             table.to_csv(csv_path, index=False)
             print(f"Saving: {csv_path}")
