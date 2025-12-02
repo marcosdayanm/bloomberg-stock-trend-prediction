@@ -17,6 +17,7 @@ class CNNBiLSTMModel(L.LightningModule):
         self.config = config
         
         # CNN layers
+        # in_channels usa n_features del config
         self.conv1 = nn.Conv1d(
             in_channels=config.n_features,
             out_channels=config.cnn_filters_1,
@@ -35,9 +36,39 @@ class CNNBiLSTMModel(L.LightningModule):
         self.bn2 = nn.BatchNorm1d(config.cnn_filters_2)
         self.dropout2 = nn.Dropout(config.cnn_dropout)
         
-        # BiLSTM layer
+        # Tercera capa CNN para más profundidad
+        self.conv3 = nn.Conv1d(
+            in_channels=config.cnn_filters_2,
+            out_channels=config.cnn_filters_3,
+            kernel_size=config.cnn_kernel_size,
+            padding="same"
+        )
+        self.bn3 = nn.BatchNorm1d(config.cnn_filters_3)
+        self.dropout3 = nn.Dropout(config.cnn_dropout)
+        
+        # Cuarta capa CNN (NUEVA)
+        self.conv4 = nn.Conv1d(
+            in_channels=config.cnn_filters_3,
+            out_channels=config.cnn_filters_4,
+            kernel_size=config.cnn_kernel_size,
+            padding="same"
+        )
+        self.bn4 = nn.BatchNorm1d(config.cnn_filters_4)
+        self.dropout4 = nn.Dropout(config.cnn_dropout)
+        
+        # Quinta capa CNN (NUEVA)
+        self.conv5 = nn.Conv1d(
+            in_channels=config.cnn_filters_4,
+            out_channels=config.cnn_filters_5,
+            kernel_size=config.cnn_kernel_size,
+            padding="same"
+        )
+        self.bn5 = nn.BatchNorm1d(config.cnn_filters_5)
+        self.dropout5 = nn.Dropout(config.cnn_dropout)
+        
+        # BiLSTM layer (ahora recibe cnn_filters_5)
         self.lstm = nn.LSTM(
-            input_size=config.cnn_filters_2,
+            input_size=config.cnn_filters_5,
             hidden_size=config.lstm_hidden_size,
             num_layers=config.lstm_num_layers,
             batch_first=True,
@@ -46,18 +77,52 @@ class CNNBiLSTMModel(L.LightningModule):
         )
         self.lstm_dropout = nn.Dropout(config.lstm_dropout)
         
+        # Transformer Encoder (NUEVO) - Para capturar patrones de largo plazo
+        if config.use_transformer:
+            encoder_layer = nn.TransformerEncoderLayer(
+                d_model=config.lstm_hidden_size * 2,
+                nhead=config.transformer_heads,
+                dim_feedforward=config.lstm_hidden_size * 4,
+                dropout=0.2,
+                batch_first=True
+            )
+            self.transformer = nn.TransformerEncoder(
+                encoder_layer,
+                num_layers=config.transformer_layers
+            )
+        else:
+            self.transformer = None
+        
         # Attention mechanism
         self.attention = nn.Linear(config.lstm_hidden_size * 2, 1)
         
-        # Dense layers con BatchNorm
-        self.fc1 = nn.Linear(config.lstm_hidden_size * 2, config.dense_hidden)
-        self.bn_fc1 = nn.BatchNorm1d(config.dense_hidden)  # BatchNorm para estabilizar
+        # Dense layers - Clasificador de 2 capas
+        self.fc1 = nn.Linear(config.lstm_hidden_size * 2, config.dense_hidden_1)
+        self.bn_fc1 = nn.BatchNorm1d(config.dense_hidden_1)
         self.fc1_dropout = nn.Dropout(config.dense_dropout)
         
-        self.fc2 = nn.Linear(config.dense_hidden, config.n_classes)
+        self.fc2 = nn.Linear(config.dense_hidden_1, config.dense_hidden_2)
+        self.bn_fc2 = nn.BatchNorm1d(config.dense_hidden_2)
+        self.fc2_dropout = nn.Dropout(config.dense_dropout)
         
-        # Loss function con class weights para balancear dataset
-        self.criterion = nn.CrossEntropyLoss(label_smoothing=0.1)  # Label smoothing anti-overfitting
+        self.fc3 = nn.Linear(config.dense_hidden_2, config.dense_hidden_3)
+        self.bn_fc3 = nn.BatchNorm1d(config.dense_hidden_3)
+        self.fc3_dropout = nn.Dropout(config.dense_dropout)
+        
+        self.fc4 = nn.Linear(config.dense_hidden_3, config.n_classes)
+        
+        # Loss function para clasificación binaria
+        # Distribución: Bajista (43.5%), Alcista (56.5%)
+        # Peso inverso para balancear
+        class_weights = torch.tensor([
+            1.15,   # Clase 0 (Bajista) - aumentar peso (minoritaria)
+            0.87    # Clase 1 (Alcista) - reducir peso (mayoritaria)
+        ], dtype=torch.float32)
+        
+        self.criterion = nn.CrossEntropyLoss(
+            weight=class_weights,
+            label_smoothing=0.1  # AUMENTADO de 0.05 a 0.1 para evitar overconfidence
+        )
         
         # Metrics
         self.train_acc = Accuracy(task="multiclass", num_classes=config.n_classes)
@@ -96,12 +161,34 @@ class CNNBiLSTMModel(L.LightningModule):
         x = torch.relu(x)
         x = self.dropout2(x)
         
+        # CNN block 3
+        x = self.conv3(x)
+        x = self.bn3(x)
+        x = torch.relu(x)
+        x = self.dropout3(x)
+        
+        # CNN block 4 (NUEVO)
+        x = self.conv4(x)
+        x = self.bn4(x)
+        x = torch.relu(x)
+        x = self.dropout4(x)
+        
+        # CNN block 5 (NUEVO)
+        x = self.conv5(x)
+        x = self.bn5(x)
+        x = torch.relu(x)
+        x = self.dropout5(x)
+        
         # BiLSTM expects (batch, seq_len, features)
-        x = x.transpose(1, 2)  # (batch, seq_len, cnn_filters_2)
+        x = x.transpose(1, 2)  # (batch, seq_len, cnn_filters_5)
         
         # BiLSTM
         lstm_out, _ = self.lstm(x)  # (batch, seq_len, lstm_hidden*2)
         lstm_out = self.lstm_dropout(lstm_out)
+        
+        # Transformer (NUEVO) - Para patrones temporales complejos
+        if self.transformer is not None:
+            lstm_out = self.transformer(lstm_out)
         
         # Attention mechanism
         attention_weights = torch.softmax(
@@ -113,13 +200,23 @@ class CNNBiLSTMModel(L.LightningModule):
             lstm_out * attention_weights.unsqueeze(-1), dim=1
         )  # (batch, lstm_hidden*2)
         
-        # Dense layers con BatchNorm
+        # Dense layers con BatchNorm - Clasificador profundo
         x = self.fc1(context)
-        x = self.bn_fc1(x)  # BatchNorm antes de activación
+        x = self.bn_fc1(x)
         x = torch.relu(x)
         x = self.fc1_dropout(x)
         
-        logits = self.fc2(x)  # (batch, n_classes)
+        x = self.fc2(x)
+        x = self.bn_fc2(x)
+        x = torch.relu(x)
+        x = self.fc2_dropout(x)
+        
+        x = self.fc3(x)
+        x = self.bn_fc3(x)
+        x = torch.relu(x)
+        x = self.fc3_dropout(x)
+        
+        logits = self.fc4(x)  # (batch, n_classes)
         
         return logits
     
@@ -200,21 +297,29 @@ class CNNBiLSTMModel(L.LightningModule):
             eps=1e-8
         )
         
-        # Cosine Annealing con Warmup - mejor que ReduceLROnPlateau
-        from torch.optim.lr_scheduler import CosineAnnealingWarmRestarts
+        # OneCycleLR - Mejor que CosineAnnealing para convergencia rápida
+        from torch.optim.lr_scheduler import OneCycleLR
         
-        scheduler = CosineAnnealingWarmRestarts(
+        # Calcular steps por época (aprox) - usando nuevo batch size
+        train_samples = 5098  # Dataset binario: 6373 * 0.8 = 5098 muestras
+        steps_per_epoch = train_samples // self.config.batch_size
+        
+        scheduler = OneCycleLR(
             optimizer,
-            T_0=10,      # Restart cada 10 épocas
-            T_mult=2,    # Duplicar periodo cada restart
-            eta_min=1e-6 # LR mínimo
+            max_lr=self.config.learning_rate * 5,  # Pico 5x el LR base (antes 10x)
+            epochs=self.config.max_epochs,
+            steps_per_epoch=steps_per_epoch,
+            pct_start=0.2,  # 20% warmup (más rápido)
+            anneal_strategy='cos',
+            div_factor=20.0,  # LR inicial = max_lr / 20
+            final_div_factor=500.0  # LR final muy bajo para fine-tuning
         )
         
         return {
             "optimizer": optimizer,
             "lr_scheduler": {
                 "scheduler": scheduler,
-                "interval": "epoch",
+                "interval": "step",  # Update every step, not epoch
                 "frequency": 1
             }
         }

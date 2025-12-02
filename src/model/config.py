@@ -8,32 +8,48 @@ from pathlib import Path
 class ModelConfig:
     """Model architecture configuration."""
     
-    # Input dimensions
-    sequence_length: int = 60
-    n_features: int = 237
-    n_classes: int = 12
+    # Input dimensions - DATASET OPTIMIZADO (solo top 50 features discriminativas)
+    sequence_length: int = 30     # REDUCIDO de 120 a 30 días - menos overfitting
+    n_features: int = 50          # REDUCIDO de 224 a 50 - solo features importantes
+    n_classes: int = 2            # BINARIO: Bajista vs Alcista (PERFECTAMENTE BALANCEADO 50-50)
     
-    # CNN layers
-    cnn_filters_1: int = 32
-    cnn_filters_2: int = 64
+    # CNN layers - OPTIMIZADO para 50 features (menos filtros)
+    cnn_filters_1: int = 128     # Reducido de 256
+    cnn_filters_2: int = 256     # Reducido de 512
+    cnn_filters_3: int = 256     # Reducido de 512
+    cnn_filters_4: int = 256     # Reducido de 512
+    cnn_filters_5: int = 256     # Reducido de 512
     cnn_kernel_size: int = 5
-    cnn_dropout: float = 0.5
+    cnn_dropout: float = 0.3     # Balanceado: permite aprendizaje sin overfitting extremo
     
-    # BiLSTM layer - Simplificar modelo
-    lstm_hidden_size: int = 64
-    lstm_num_layers: int = 1
-    lstm_dropout: float = 0.5  
+    # BiLSTM layer - REDUCIDO para evitar overfitting (45M→5M params)
+    lstm_hidden_size: int = 256  # REDUCIDO de 512 a 256
+    lstm_num_layers: int = 3     # REDUCIDO de 4 a 3 capas
+    lstm_dropout: float = 0.3    # Balanceado para permitir aprendizaje
     
-    # Dense layers - Simplificar
-    dense_hidden: int = 64
-    dense_dropout: float = 0.5 
+    # Transformer Encoder - REDUCIDO para evitar overfitting
+    use_transformer: bool = True
+    transformer_heads: int = 4   # REDUCIDO de 8 a 4
+    transformer_layers: int = 1  # REDUCIDO de 2 a 1 capa
     
-    # Training - Configuración anti-overfitting
-    learning_rate: float = .000001 
-    weight_decay: float = .0001  
-    batch_size: int = 128
-    max_epochs: int = 150
-    early_stopping_patience: int = 20  # Menos paciencia
+    # Dense layers - REDUCIDO para evitar overfitting
+    dense_hidden_1: int = 256    # REDUCIDO de 512 a 256
+    dense_hidden_2: int = 128    # REDUCIDO de 256 a 128
+    dense_hidden_3: int = 64     # REDUCIDO de 128 a 64
+    dense_dropout: float = 0.35  # Balanceado: permite aprendizaje
+    
+    # Training - OPTIMIZADO anti-overfitting
+    learning_rate: float = 0.0002  # AUMENTADO de 0.0001 para aprendizaje más rápido
+    weight_decay: float = 0.005    # REDUCIDO de 0.01 a 0.005 para menos restricción
+    label_smoothing: float = 0.1   # NUEVO: evita overconfidence
+    batch_size: int = 16          # Batch óptimo para MPS con modelo grande
+    max_epochs: int = 150         # REDUCIDO de 300 a 150 para entrenamiento más rápido
+    early_stopping_patience: int = 15  # REDUCIDO de 40 a 15 para detectar overfitting temprano
+    gradient_clip_val: float = 1.0  # Gradient clipping estándar
+    
+    # MPS Optimizations
+    use_amp: bool = False         # MPS usa FP32 (más estable que mixed precision)
+    accumulate_grad_batches: int = 4  # Gradient accumulation para batch efectivo de 64
     
     # Data splits (percentages) 
     train_split: float = 0.80

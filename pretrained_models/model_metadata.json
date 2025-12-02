@@ -1,0 +1,89 @@
+{
+  "model_name": "Bloomberg Stock Trend Prediction v2.0",
+  "version": "2.0",
+  "release_date": "2025-12-01",
+  "author": "Miguel Noriega Bedolla",
+  "performance": {
+    "test_accuracy": 0.795,
+    "validation_accuracy": 0.8,
+    "f1_score": 0.794,
+    "train_test_gap": 0.006,
+    "precision_bajista": 0.926,
+    "precision_alcista": 0.953,
+    "recall_bajista": 0.926,
+    "recall_alcista": 0.953
+  },
+  "training": {
+    "epoch": 143,
+    "global_step": 12960,
+    "training_time_hours": 2.0,
+    "hardware": "Apple M3 Pro (MPS)",
+    "framework": "PyTorch 2.6.0 + Lightning 2.4+"
+  },
+  "architecture": {
+    "total_parameters": 7702786,
+    "model_size_mb": 30.1,
+    "input_shape": [
+      30,
+      50
+    ],
+    "output_classes": 2,
+    "cnn_layers": 5,
+    "lstm_layers": 3,
+    "transformer_layers": 1,
+    "attention_heads": 4
+  },
+  "hyperparameters": {
+    "sequence_length": 30,
+    "n_features": 50,
+    "n_classes": 2,
+    "cnn_filters_1": 128,
+    "cnn_filters_2": 256,
+    "cnn_filters_3": 256,
+    "cnn_filters_4": 256,
+    "cnn_filters_5": 256,
+    "cnn_kernel_size": 5,
+    "cnn_dropout": 0.3,
+    "lstm_hidden_size": 256,
+    "lstm_num_layers": 3,
+    "lstm_dropout": 0.3,
+    "use_transformer": true,
+    "transformer_heads": 4,
+    "transformer_layers": 1,
+    "dense_hidden_1": 256,
+    "dense_hidden_2": 128,
+    "dense_hidden_3": 64,
+    "dense_dropout": 0.35,
+    "learning_rate": 0.0002,
+    "weight_decay": 0.005,
+    "label_smoothing": 0.1,
+    "batch_size": 16,
+    "max_epochs": 150,
+    "early_stopping_patience": 15,
+    "gradient_clip_val": 1.0,
+    "use_amp": false,
+    "accumulate_grad_batches": 4,
+    "train_split": 0.8,
+    "val_split": 0.1,
+    "test_split": 0.1,
+    "local_test_samples": 5,
+    "data_dir": "datasets/npy",
+    "model_dir": "src/model/checkpoints",
+    "log_dir": "src/model/logs"
+  },
+  "dataset": {
+    "total_samples": 7202,
+    "train_samples": 5761,
+    "val_samples": 720,
+    "test_samples": 721,
+    "class_balance": "50-50",
+    "sequence_length": 30,
+    "n_features": 50,
+    "prediction_horizon": 5
+  },
+  "files": {
+    "checkpoint": "best_model_v2.0.ckpt",
+    "size_bytes": 92101549,
+    "format": "PyTorch Lightning Checkpoint"
+  }
+}
