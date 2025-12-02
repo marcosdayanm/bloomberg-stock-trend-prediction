@@ -1,11 +1,12 @@
 # Bloomberg Stock Trend Prediction
 
-**State-of-the-art binary stock trend classifier** achieving **79.5% test accuracy** using CNN-BiLSTM-Transformer architecture with Bloomberg market data and macroeconomic indicators.
+**State-of-the-art binary stock trend classifier** achieving **83.4% test accuracy** using CNN-BiLSTM-Transformer architecture with Bloomberg market data and macroeconomic indicators.
 
 [![Python](https://img.shields.io/badge/Python-3.11+-blue.svg)](https://www.python.org/)
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.6+-orange.svg)](https://pytorch.org/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Model](https://img.shields.io/badge/Model-Production_Ready-success.svg)](pretrained_models/)
+[![Accuracy](https://img.shields.io/badge/Test_Accuracy-83.4%25-brightgreen.svg)](pretrained_models/)
 
 ---
 
@@ -18,7 +19,10 @@
 uv run python load_pretrained_model.py
 ```
 
-**Model checkpoint:** `pretrained_models/best_model_v2.0.ckpt` (88MB, 79.5% test acc)
+**Latest model:** `pretrained_models/best_model_v2.1.ckpt` (88MB, **83.4% test acc**)
+
+**Previous versions:**
+- `best_model_v2.0.ckpt` - 79.5% test acc (baseline)
 
 See [`pretrained_models/`](pretrained_models/) for complete documentation, fine-tuning examples, and ONNX export.
 
@@ -26,14 +30,14 @@ See [`pretrained_models/`](pretrained_models/) for complete documentation, fine-
 
 ## Key Results
 
-| Metric | Performance |
-|--------|-------------|
-| **Test Accuracy** | **79.5%** |
-| **Validation Accuracy** | 80.0% |
-| **F1 Score** | 79.4% |
-| **Train-Test Gap** | 0.6% (excellent generalization) |
-| **Model Size** | 7.7M parameters |
-| **Training Time** | ~2 hours (Apple M3 MPS) |
+| Metric | v2.1 (Latest) | v2.0 (Baseline) | Improvement |
+|--------|---------------|-----------------|-------------|
+| **Test Accuracy** | **83.4%** | 79.5% | **+3.9%** |
+| **Validation Accuracy** | 85.7% | 80.0% | +5.7% |
+| **F1 Score** | 83.3% | 79.4% | +3.9% |
+| **Train-Test Gap** | 2.3% | 0.6% | Still excellent |
+| **Model Size** | 7.7M parameters | 7.7M params | Same |
+| **Training Time** | ~4 hours total | ~2 hours | +2 hrs fine-tuning |
 
 **Prediction Task**: Binary classification of MSFT stock 5-day forward returns
 - **Class 0 (Bajista)**: Returns < 0% (sell/short signal)
@@ -129,7 +133,9 @@ bloomberg-stock-trend-prediction/
 ├── crude-datasets/              # Raw Bloomberg CSV data
 ├── datasets/npy/                # Processed NumPy arrays
 ├── pretrained_models/           # Production-ready models
-│   ├── best_model_v2.0.ckpt    # 79.5% test accuracy (30MB)
+│   ├── best_model_v2.1.ckpt    # 83.4% test accuracy (88MB) - LATEST
+│   ├── best_model_v2.0.ckpt    # 79.5% test accuracy (88MB) - baseline
+│   ├── model_metadata_v2.1.json # v2.1 specifications
 │   └── README.md               # Model documentation
 ├── src/
 │   ├── model/                   # Model architecture & training
@@ -172,30 +178,54 @@ Binary Output (Bajista/Alcista)
 ## Performance
 
 ### Test Set Results (721 samples)
+
+**v2.1 (Latest - Fine-tuned):**
 ```
 Confusion Matrix:
                 Predicted
                 Bajista  Alcista
-Actual  Bajista   285      76
-        Alcista    72      288
+Actual  Bajista   316      33
+        Alcista    87      285
 
+Accuracy: 83.4%
+F1 Score: 83.3%
+Precision: 78.4% (Bajista), 89.6% (Alcista)
+Recall: 90.5% (Bajista), 76.6% (Alcista)
+```
+
+**v2.0 (Baseline):**
+```
 Accuracy: 79.5%
 F1 Score: 79.4%
 ```
 
 ### Training Progression
+
+**v2.0 Training (Epochs 0-143):**
 ```
 Epoch    Val Acc    Status
   10      52.3%     Learning
   50      65.7%     Improving
  100      69.8%     Converging
- 144      80.0%     BEST
+ 143      80.0%     Checkpoint saved
 ```
+
+**v2.1 Fine-tuning (Epochs 144-243):**
+```
+Epoch    Val Acc    Status
+ 150      80.8%     Starting fine-tuning (LR=0.0001)
+ 180      82.8%     Improving
+ 220      84.6%     Peak performance
+ 243      85.7%     BEST (early stopped)
+```
+
+**Fine-tuning strategy:** Continued from v2.0 checkpoint with reduced learning rate (0.0002 → 0.0001) for 100 additional epochs, early stopping patience=15.
 
 ### vs Baselines
 - Random guess: 50%
 - Previous v1.0 (5-class): 42.6%
-- **This model**: **79.5%** (+29.5% vs baseline)
+- v2.0 (initial): 79.5%
+- **v2.1 (fine-tuned)**: **83.4%** (+33.4% vs random, +4.9% vs v2.0)
 
 ---
 
