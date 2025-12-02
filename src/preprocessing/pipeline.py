@@ -68,7 +68,8 @@ def run_preprocessing(
 
 if __name__ == "__main__":
     # bins = [-np.inf, -10, -5, -3, -2, -1, 0, 1, 2, 3, 5, 10, np.inf]
-    balanced_bins = [-np.inf, -6.2, -3.8, -2.2, -1, -0.2, 0.6, 1.4, 2.3, 3.3, 4.6, 6.7, np.inf]
+    # bins = [-np.inf, -6.2, -3.8, -2.2, -1, -0.2, 0.6, 1.4, 2.3, 3.3, 4.6, 6.7, np.inf] # balanced
+    bins = [-np.inf, 0, np.inf]
     start_date = "2000-01-03"
     end_date = "2025-11-20"
     
@@ -77,18 +78,25 @@ if __name__ == "__main__":
         "MSFT_*",
         "QQQ_*",
         "SPY_*",
-        "INDICATORS_*"
+        "AAPL_*",
+        "AMZN_*",
+        "NVDA_*",
+        "INDICATORS_VIX*", # Market volatility
+        "INDICATORS_FDTR*",  # Fed funds rate
+        "INDICATORS_CPI*",  # Inflation indicators
+        "INDICATORS_USURTOT*", # Unemployment
+        "INDICATORS_DXY*",  # Dollar strength
     ]
 
     X, y = run_preprocessing(
         target_ticker="MSFT",
         sequence_length=60,
         horizon=10,
-        return_bins=balanced_bins,
+        return_bins=bins,
         start_date=start_date,
         end_date=end_date,
         skip_excel_parsing=True,
         analyze_features=True,
         analyze_data=True,
-        # feature_columns=include_features
+        feature_columns=include_features
     )

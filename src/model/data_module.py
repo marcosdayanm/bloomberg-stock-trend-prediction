@@ -17,6 +17,7 @@ class StockDataModule(L.LightningDataModule):
         self.config = config
         self.data_dir = config.data_dir
         self.pin_memory = pin_memory
+        self.noise_std = config.noise_std
         
         # Data arrays
         self.X: np.ndarray | None = None
@@ -84,8 +85,9 @@ class StockDataModule(L.LightningDataModule):
             X_val = np.load(self.data_dir / "val_X.npy")
             y_val = np.load(self.data_dir / "val_y.npy")
             
-            self.train_dataset = StockDataset(X_train, y_train)
-            self.val_dataset = StockDataset(X_val, y_val)
+            # Add noise augmentation only to training set
+            self.train_dataset = StockDataset(X_train, y_train, noise_std=self.noise_std, is_training=True)
+            self.val_dataset = StockDataset(X_val, y_val, noise_std=0.0, is_training=False)
             
         if stage == "test" or stage is None:
             X_test = np.load(self.data_dir / "test_X.npy")

@@ -13,6 +13,12 @@ from src.model.config import ModelConfig
 from src.model.data_module import StockDataModule
 from src.model.model import CNNBiLSTMModel
 from src.model.utils import get_most_optimal_device
+from src.model.callbacks import (
+    OverfittingMonitor,
+    GradientNormMonitor,
+    AdaptiveLRCallback,
+    BestMetricsPrinter
+)
 
 
 def train():
@@ -39,38 +45,49 @@ def train():
     model = CNNBiLSTMModel(config)
     
     # Callbacks
-    # Best model checkpoint (only saves when accuracy > 40% and improves)
     best_checkpoint = ModelCheckpoint(
-        dirpath=config.model_dir,
-        filename="best-{epoch:02d}-acc{val_acc:.4f}-loss{val_loss:.4f}",
+        dirpath=config.model_dir / "best",
+        filename=f"{{val_acc:.4f}}_{{val_loss:.4f}}_{{train_acc:.4f}}_{{epoch:02d}}",
         monitor="val_acc",
         mode="max",
         save_top_k=1,  # Only keep the absolute best
         save_last=False,
         verbose=True,
-        every_n_epochs=1,  # Check every epoch but only save if improves
-        save_on_train_epoch_end=False  # Save after validation
+        every_n_epochs=1,
+        save_on_train_epoch_end=False
     )
     
-    # Milestone checkpoints (saves every 10 epochs if acc > 40%)
     milestone_checkpoint = ModelCheckpoint(
-        dirpath=config.model_dir / "milestones",
-        filename="milestone-epoch{epoch:02d}-acc{val_acc:.4f}",
+        dirpath=config.model_dir / "checkpoints",
+        filename=f"{{val_acc:.4f}}_{{val_loss:.4f}}_{{train_acc:.4f}}_{{epoch:02d}}",
         monitor="val_acc",
         mode="max",
         save_top_k=-1,  # Keep all milestones
-        every_n_epochs=10,  # Save every 10 epochs
+        every_n_epochs=10,
         verbose=False
     )
     
     early_stop_callback = EarlyStopping(
-        monitor="val_loss",  # Mejor usar loss (más estable que accuracy)
+        monitor="val_loss",
         patience=config.early_stopping_patience,
         mode="min",
         verbose=True,
-        min_delta=0.001  # Mejora mínima: 0.1% (era 1% - demasiado agresivo)
+        min_delta=0.001
     )
     
+    # Anti-overfitting callbacks
+    overfitting_monitor = OverfittingMonitor(
+        max_gap=config.overfitting_warning_threshold,
+        stop_on_large_gap=False
+    )
+    
+    adaptive_lr = AdaptiveLRCallback(
+        gap_threshold=config.overfitting_lr_threshold,
+        lr_reduction=0.5
+    )
+    
+    gradient_monitor = GradientNormMonitor()
+    metrics_printer = BestMetricsPrinter()
     lr_monitor = LearningRateMonitor(logging_interval="epoch")
     
     # Logger
@@ -80,23 +97,26 @@ def train():
         version=None
     )
     
-    # Trainer with auto-detected optimal device
     trainer = L.Trainer(
         max_epochs=config.max_epochs,
-        accelerator=accelerator,  # Auto-detected (CUDA/MPS/CPU)
+        accelerator=accelerator,
         devices=devices if devices is not None else "auto",
-        precision="32" if accelerator == "mps" else "16-mixed",  # MPS uses FP32, CUDA uses FP16
+        precision="32" if accelerator == "mps" else "16-mixed",
         callbacks=[
             best_checkpoint,
             milestone_checkpoint,
             early_stop_callback,
+            overfitting_monitor,  # Monitor train/val gap
+            adaptive_lr,  # Reduce LR if overfitting
+            gradient_monitor,  # Monitor gradient norms
+            metrics_printer,  # Print best metrics at end
             lr_monitor,
             RichProgressBar()
         ],
         logger=logger,
         log_every_n_steps=10,
-        deterministic=False,  # MPS doesn't support full determinism
-        gradient_clip_val=1.0,
+        deterministic=False,
+        gradient_clip_val=config.gradient_clip_val,  # Use config value
         enable_progress_bar=True,
         enable_model_summary=True
     )
@@ -152,7 +172,6 @@ def train():
 
 
 if __name__ == "__main__":
-    # Set seed for reproducibility
     L.seed_everything(42)
     
     train()

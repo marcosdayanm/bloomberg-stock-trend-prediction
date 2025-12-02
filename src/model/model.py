@@ -4,8 +4,10 @@ import torch
 import torch.nn as nn
 import lightning as L
 from torchmetrics import Accuracy, F1Score, ConfusionMatrix
+from torch.optim.lr_scheduler import ReduceLROnPlateau
 
 from src.model.config import ModelConfig
+
 
 
 class CNNBiLSTMModel(L.LightningModule):
@@ -24,6 +26,7 @@ class CNNBiLSTMModel(L.LightningModule):
             padding="same"
         )
         self.bn1 = nn.BatchNorm1d(config.cnn_filters_1)
+        self.relu1 = nn.ReLU()
         self.dropout1 = nn.Dropout(config.cnn_dropout)
         
         self.conv2 = nn.Conv1d(
@@ -33,11 +36,22 @@ class CNNBiLSTMModel(L.LightningModule):
             padding="same"
         )
         self.bn2 = nn.BatchNorm1d(config.cnn_filters_2)
+        self.relu2 = nn.ReLU()
         self.dropout2 = nn.Dropout(config.cnn_dropout)
         
-        # BiLSTM layer
+        self.conv3 = nn.Conv1d(
+            in_channels=config.cnn_filters_2,
+            out_channels=config.cnn_filters_3,
+            kernel_size=config.cnn_kernel_size,
+            padding="same"
+        )
+        self.bn3 = nn.BatchNorm1d(config.cnn_filters_3)
+        self.relu3 = nn.ReLU()
+        self.dropout3 = nn.Dropout(config.cnn_dropout)
+        
+        # BiLSTM layer - 2 layers deep
         self.lstm = nn.LSTM(
-            input_size=config.cnn_filters_2,
+            input_size=config.cnn_filters_3,
             hidden_size=config.lstm_hidden_size,
             num_layers=config.lstm_num_layers,
             batch_first=True,
@@ -49,15 +63,24 @@ class CNNBiLSTMModel(L.LightningModule):
         # Attention mechanism
         self.attention = nn.Linear(config.lstm_hidden_size * 2, 1)
         
-        # Dense layers con BatchNorm
-        self.fc1 = nn.Linear(config.lstm_hidden_size * 2, config.dense_hidden)
-        self.bn_fc1 = nn.BatchNorm1d(config.dense_hidden)  # BatchNorm para estabilizar
+        # Dense layers
+        self.fc1 = nn.Linear(config.lstm_hidden_size * 2, config.dense_hidden_1)
+        self.bn_fc1 = nn.BatchNorm1d(config.dense_hidden_1)
+        self.relu_fc1 = nn.ReLU()
         self.fc1_dropout = nn.Dropout(config.dense_dropout)
         
-        self.fc2 = nn.Linear(config.dense_hidden, config.n_classes)
+        self.fc2 = nn.Linear(config.dense_hidden_1, config.dense_hidden_2)
+        self.bn_fc2 = nn.BatchNorm1d(config.dense_hidden_2)
+        self.relu_fc2 = nn.ReLU()
+        self.fc2_dropout = nn.Dropout(config.dense_dropout)
         
-        # Loss function con class weights para balancear dataset
-        self.criterion = nn.CrossEntropyLoss(label_smoothing=0.1)  # Label smoothing anti-overfitting
+        self.fc3 = nn.Linear(config.dense_hidden_2, config.n_classes)
+        
+        class_weights = torch.tensor([1.0, 1.0])  # Equal weights for balanced learning
+        self.criterion = nn.CrossEntropyLoss(
+            weight=class_weights,
+            label_smoothing=0.1
+        )
         
         # Metrics
         self.train_acc = Accuracy(task="multiclass", num_classes=config.n_classes)
@@ -87,19 +110,25 @@ class CNNBiLSTMModel(L.LightningModule):
         # CNN block 1
         x = self.conv1(x)
         x = self.bn1(x)
-        x = torch.relu(x)
+        x = self.relu1(x)
         x = self.dropout1(x)
         
         # CNN block 2
         x = self.conv2(x)
         x = self.bn2(x)
-        x = torch.relu(x)
+        x = self.relu2(x)
         x = self.dropout2(x)
         
-        # BiLSTM expects (batch, seq_len, features)
-        x = x.transpose(1, 2)  # (batch, seq_len, cnn_filters_2)
+        # CNN block 3 - Additional depth
+        x = self.conv3(x)
+        x = self.bn3(x)
+        x = self.relu3(x)
+        x = self.dropout3(x)
         
-        # BiLSTM
+        # BiLSTM expects (batch, seq_len, features)
+        x = x.transpose(1, 2)  # (batch, seq_len, cnn_filters_3)
+        
+        # BiLSTM - 2 layers deep
         lstm_out, _ = self.lstm(x)  # (batch, seq_len, lstm_hidden*2)
         lstm_out = self.lstm_dropout(lstm_out)
         
@@ -113,13 +142,20 @@ class CNNBiLSTMModel(L.LightningModule):
             lstm_out * attention_weights.unsqueeze(-1), dim=1
         )  # (batch, lstm_hidden*2)
         
-        # Dense layers con BatchNorm
+        # Dense layer 1
         x = self.fc1(context)
-        x = self.bn_fc1(x)  # BatchNorm antes de activación
-        x = torch.relu(x)
+        x = self.bn_fc1(x)
+        x = self.relu_fc1(x)
         x = self.fc1_dropout(x)
         
-        logits = self.fc2(x)  # (batch, n_classes)
+        # Dense layer 2
+        x = self.fc2(x)
+        x = self.bn_fc2(x)
+        x = self.relu_fc2(x)
+        x = self.fc2_dropout(x)
+        
+        # Output layer
+        logits = self.fc3(x)  # (batch, n_classes)
         
         return logits
     
@@ -200,20 +236,20 @@ class CNNBiLSTMModel(L.LightningModule):
             eps=1e-8
         )
         
-        # Cosine Annealing con Warmup - mejor que ReduceLROnPlateau
-        from torch.optim.lr_scheduler import CosineAnnealingWarmRestarts
-        
-        scheduler = CosineAnnealingWarmRestarts(
+        # ReduceLROnPlateau - reduces LR when validation loss plateaus
+        scheduler = ReduceLROnPlateau(
             optimizer,
-            T_0=10,      # Restart cada 10 épocas
-            T_mult=2,    # Duplicar periodo cada restart
-            eta_min=1e-6 # LR mínimo
+            mode='min',
+            factor=0.5, # factor of reducement
+            patience=5,   # wait 5 epochs before reducing
+            min_lr=1e-6 
         )
         
         return {
             "optimizer": optimizer,
             "lr_scheduler": {
                 "scheduler": scheduler,
+                "monitor": "val_loss",
                 "interval": "epoch",
                 "frequency": 1
             }
