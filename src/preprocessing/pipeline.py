@@ -13,6 +13,7 @@ def run_preprocessing(
     target_ticker: str = "MSFT",
     sequence_length: int = 60,
     horizon: int = 10,
+    task_type: str = 'classification',  # 'classification' | 'regression'
     return_bins: list[float] | None = None,
     start_date: str = "2000-01-03",
     end_date: str = "2025-11-20",
@@ -25,10 +26,13 @@ def run_preprocessing(
     Run complete preprocessing pipeline.
     """
     if return_bins is None:
-        return_bins = [-np.inf, -10, -5, -3, -2, -1, 0, 1, 2, 3, 5, 10, np.inf]
+        if task_type == 'classification':
+            return_bins = [-np.inf, 0, np.inf]
+        else:
+            return_bins = None  # No bins for regression
     
     print(f"\n{'='*80}")
-    print(f"PREPROCESSING: {target_ticker} | {sequence_length}d seq | {horizon}d horizon")
+    print(f"PREPROCESSING: {target_ticker} | {task_type.upper()} | {sequence_length}d seq | {horizon}d horizon")
     print(f"{'='*80}\n")
     
     # Parse Excel → CSV
@@ -54,6 +58,7 @@ def run_preprocessing(
     builder = StockDatasetBuilder(
         sequence_length=sequence_length,
         horizon=horizon,
+        task_type=task_type,
         return_bins=return_bins,
         start_date=start_date,
         end_date=end_date,
@@ -67,28 +72,22 @@ def run_preprocessing(
 
 
 if __name__ == "__main__":
-    # bins = [-np.inf, -10, -5, -3, -2, -1, 0, 1, 2, 3, 5, 10, np.inf]
-    balanced_bins = [-np.inf, -6.2, -3.8, -2.2, -1, -0.2, 0.6, 1.4, 2.3, 3.3, 4.6, 6.7, np.inf]
+    TASK_TYPE = 'classification'  # Change to 'regression' for regression task
+    
+    # Binary classification bins (only used if task_type='classification')
+    binary_bins = [-np.inf, 0, np.inf]
     start_date = "2000-01-03"
     end_date = "2025-11-20"
-    
-    
-    include_features= [
-        "MSFT_*",
-        "QQQ_*",
-        "SPY_*",
-        "INDICATORS_*"
-    ]
 
     X, y = run_preprocessing(
         target_ticker="MSFT",
-        sequence_length=60,
+        sequence_length=30,
         horizon=10,
-        return_bins=balanced_bins,
+        task_type=TASK_TYPE,
+        return_bins=binary_bins if TASK_TYPE == 'classification' else None,
         start_date=start_date,
         end_date=end_date,
         skip_excel_parsing=True,
-        analyze_features=True,
+        analyze_features=False,
         analyze_data=True,
-        # feature_columns=include_features
     )

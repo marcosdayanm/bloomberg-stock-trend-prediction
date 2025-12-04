@@ -3,6 +3,8 @@ import numpy as np
 from pathlib import Path
 import pandas_market_calendars as mcal
 from fnmatch import fnmatch
+from sklearn.feature_selection import mutual_info_classif
+from imblearn.over_sampling import RandomOverSampler
 
 from src.constants import CRUDE_DATASETS_DIR, DATASETS_DIR
 from src.preprocessing.dataset_analyzer import DatasetAnalyzer
@@ -15,16 +17,22 @@ class StockDatasetBuilder:
         self,
         sequence_length: int = 60,
         horizon: int = 10,
-        return_bins: list[float] = [-np.inf, -2, -1, 0, 1, 2, np.inf],
+        task_type: str = 'classification',
+        return_bins: list[float] | None = None,
         start_date: str = "2000-01-03",
         end_date: str = "2025-11-20",
         feature_columns: list[str] | None = None,
     ):
         """Initialize the dataset builder.
+        
+        Args:
+            task_type: 'classification' or 'regression'
+            return_bins: Bins for classification (ignored for regression)
         """
         self.sequence_length = sequence_length
         self.horizon = horizon
-        self.return_bins = return_bins
+        self.task_type = task_type
+        self.return_bins = return_bins if return_bins else [-np.inf, -2, -1, 0, 1, 2, np.inf]
         self.start_date = start_date
         self.end_date = end_date
         self.feature_columns = feature_columns
@@ -33,6 +41,132 @@ class StockDatasetBuilder:
         self.feature_cols: list[str] = []
         self.X: np.ndarray | None = None
         self.y: np.ndarray | None = None
+        self.removed_features: dict[str, list[str]] = {}
+    
+    def _filter_by_nulls(self, df: pd.DataFrame, threshold: float = 0.5) -> pd.DataFrame:
+        """Remove features with >threshold null values."""
+        null_pct = df.isnull().sum() / len(df)
+        cols_to_drop = null_pct[null_pct > threshold].index.tolist()
+        cols_to_drop = [c for c in cols_to_drop if c != 'date']
+        
+        if cols_to_drop:
+            self.removed_features['nulls'] = cols_to_drop
+            print(f"  Removed {len(cols_to_drop)} features with >{threshold*100:.0f}% nulls")
+            df = df.drop(columns=cols_to_drop)
+        return df
+    
+    def _filter_by_variance(self, df: pd.DataFrame, threshold: float = 0.001) -> pd.DataFrame:
+        """Remove features with variance <threshold."""
+        numeric_cols = df.select_dtypes(include=[np.number]).columns
+        numeric_cols = [c for c in numeric_cols if c != 'date']
+        
+        variances = df[numeric_cols].var()
+        cols_to_drop = variances[variances < threshold].index.tolist()
+        
+        if cols_to_drop:
+            self.removed_features['variance'] = cols_to_drop
+            print(f"  Removed {len(cols_to_drop)} features with variance <{threshold}")
+            df = df.drop(columns=cols_to_drop)
+        return df
+    
+    def _filter_by_correlation(self, df: pd.DataFrame, threshold: float = 0.95) -> pd.DataFrame:
+        """Remove highly correlated features (>threshold)."""
+        numeric_cols = df.select_dtypes(include=[np.number]).columns
+        numeric_cols = [c for c in numeric_cols if c != 'date']
+        
+        corr_matrix = df[numeric_cols].corr().abs()
+        upper_tri = corr_matrix.where(
+            np.triu(np.ones(corr_matrix.shape), k=1).astype(bool)
+        )
+        
+        cols_to_drop = [col for col in upper_tri.columns if any(upper_tri[col] > threshold)]
+        
+        if cols_to_drop:
+            self.removed_features['correlation'] = cols_to_drop
+            print(f"  Removed {len(cols_to_drop)} features with correlation >{threshold}")
+            df = df.drop(columns=cols_to_drop)
+        return df
+    
+    def _select_top_features(self, X: np.ndarray, y: np.ndarray, feature_cols: list[str], top_n: int = 50) -> tuple[np.ndarray, list[str]]:
+        """Select top N features by mutual information."""
+        print(f"\nSelecting top {top_n} features...")
+        
+        # Flatten sequences for feature selection
+        X_flat = X.reshape(X.shape[0], -1)
+        
+        # Convert y to labels for mutual information
+        if y.ndim > 1 and y.shape[1] > 1:
+            y_labels = np.argmax(y, axis=1)  # Classification
+        else:
+            # Regression: bin continuous values for mutual information
+            y_labels = pd.cut(y.ravel(), bins=10, labels=False)
+        
+        # Calculate importance per timestep
+        n_timesteps = X.shape[1]
+        feature_importance = np.zeros(len(feature_cols))
+        
+        for t in range(n_timesteps):
+            start_idx = t * len(feature_cols)
+            end_idx = start_idx + len(feature_cols)
+            X_timestep = X_flat[:, start_idx:end_idx]
+            
+            # Mutual information
+            mi_scores = mutual_info_classif(X_timestep, y_labels, random_state=42)
+            feature_importance += mi_scores
+        
+        # Average importance across timesteps
+        feature_importance /= n_timesteps
+        
+        # Select top N
+        top_indices = np.argsort(feature_importance)[-top_n:]
+        top_features = [feature_cols[i] for i in top_indices]
+        
+        X_selected = X[:, :, top_indices]
+        
+        print(f"  Selected features: {len(top_features)}")
+        print(f"  Shape: {X.shape} → {X_selected.shape}")
+        
+        # Show top 10 most important
+        sorted_idx = np.argsort(feature_importance)[-10:][::-1]
+        print("\n  Top 10 most important features:")
+        for i, idx in enumerate(sorted_idx, 1):
+            print(f"    {i}. {feature_cols[idx]}: {feature_importance[idx]:.4f}")
+        
+        return X_selected, top_features
+    
+    @staticmethod
+    def _apply_random_oversampling(X: np.ndarray, y: np.ndarray, task_type: str = 'classification') -> tuple[np.ndarray, np.ndarray]:
+        """Apply random oversampling to balance classes (classification only)."""
+        if task_type == 'regression':
+            print("\nSkipping oversampling (regression task)...")
+            return X, y
+        
+        print("\nApplying random oversampling...")
+        print(f"  Original class distribution: {y.sum(axis=0).astype(int)}")
+        
+        # Reshape for oversampling
+        n_samples, n_timesteps, n_features = X.shape
+        X_flat = X.reshape(n_samples, -1)
+        
+        # Convert one-hot to labels for oversampling
+        y_labels = np.argmax(y, axis=1)
+        
+        # Oversample
+        ros = RandomOverSampler(random_state=42)
+        X_resampled, y_labels_resampled = ros.fit_resample(X_flat, y_labels)
+        
+        # Convert back to one-hot
+        n_classes = y.shape[1]
+        y_resampled = np.zeros((len(y_labels_resampled), n_classes))
+        y_resampled[np.arange(len(y_labels_resampled)), y_labels_resampled] = 1
+        
+        # Reshape back
+        X_resampled = X_resampled.reshape(-1, n_timesteps, n_features)
+        
+        print(f"  New class distribution: {y_resampled.sum(axis=0).astype(int)}")
+        print(f"  Samples: {n_samples} → {X_resampled.shape[0]}")
+        
+        return X_resampled, y_resampled
     
     @staticmethod
     def get_us_trading_days(start_date: str, end_date: str) -> pd.DatetimeIndex:
@@ -109,12 +243,17 @@ class StockDatasetBuilder:
         return df
     
     def create_labels(self, df: pd.DataFrame, target_col: str) -> pd.DataFrame:
-        """Create classification labels based on future return buckets."""
+        """Create labels for classification or regression."""
         future_return = df[target_col].pct_change(self.horizon).shift(-self.horizon) * 100
-        df['label'] = pd.cut(future_return, bins=self.return_bins, labels=False)
         
-        label_dummies = pd.get_dummies(df['label'], prefix='label')
-        df = pd.concat([df, label_dummies], axis=1)
+        if self.task_type == 'classification':
+            # Classification: bins
+            df['label'] = pd.cut(future_return, bins=self.return_bins, labels=False)
+            label_dummies = pd.get_dummies(df['label'], prefix='label')
+            df = pd.concat([df, label_dummies], axis=1)
+        else:
+            # Regression: continuous values
+            df['label'] = future_return
         
         return df
     
@@ -144,10 +283,16 @@ class StockDatasetBuilder:
             
             print(f"  Feature selection applied: {len(feature_cols)} features selected from patterns {self.feature_columns}")
         
-        label_cols = [col for col in df.columns if col.startswith('label_')]
-        df_clean = df[['date'] + feature_cols + ['label'] + label_cols].copy()
+        if self.task_type == 'classification':
+            label_cols = [col for col in df.columns if col.startswith('label_')]
+            df_clean = df[['date'] + feature_cols + ['label'] + label_cols].copy()
+            df_clean = df_clean.dropna(subset=['label'] + label_cols)
+        else:
+            # Regression: only one label column
+            label_cols = ['label']
+            df_clean = df[['date'] + feature_cols + ['label']].copy()
+            df_clean = df_clean.dropna(subset=['label'])
         
-        df_clean = df_clean.dropna(subset=['label'] + label_cols)
         df_clean[feature_cols] = df_clean[feature_cols].ffill().fillna(0)
         
         print(f"  Rows after cleaning: {len(df_clean)} (started with {len(df)})")
@@ -161,9 +306,18 @@ class StockDatasetBuilder:
         X, y = [], []
         for i in range(len(df_clean) - self.sequence_length - self.horizon + 1):
             X.append(feature_data_norm[i:i + self.sequence_length])
-            y.append(df_clean[label_cols].iloc[i + self.sequence_length + self.horizon - 1].values)
+            if self.task_type == 'classification':
+                y.append(df_clean[label_cols].iloc[i + self.sequence_length + self.horizon - 1].values)
+            else:
+                # Regression: single value
+                y.append(df_clean['label'].iloc[i + self.sequence_length + self.horizon - 1])
         
-        return np.array(X), np.array(y), feature_cols
+        X = np.array(X)
+        y = np.array(y)
+        if self.task_type == 'regression':
+            y = y.reshape(-1, 1)  # Shape: (samples, 1)
+        
+        return X, y, feature_cols
     
     @staticmethod
     def visualize_sample(X: np.ndarray, y: np.ndarray, feature_cols: list[str], sample_idx: int = 0) -> None:
@@ -193,7 +347,7 @@ class StockDatasetBuilder:
         if self.X is None or self.y is None:
             raise ValueError("No dataset to save. Run build() first.")
         
-        output_dir = DATASETS_DIR / "npy"
+        output_dir = DATASETS_DIR / "npy" / self.task_type
         output_dir.mkdir(parents=True, exist_ok=True)
         
         np.save(output_dir / f"{output_name}_X.npy", self.X)
@@ -201,7 +355,7 @@ class StockDatasetBuilder:
         
         print(f"\nDataset saved:")
         print(f"  X shape: {self.X.shape} -> (samples, sequence_length, features)")
-        print(f"  y shape: {self.y.shape} -> (samples, classes)")
+        print(f"  y shape: {self.y.shape} -> (samples, {'classes' if self.task_type == 'classification' else 'values'})")
         print(f"  Location: {output_dir}")
         
         # Save feature names
@@ -267,17 +421,54 @@ class StockDatasetBuilder:
         print("Adding macro ratios...")
         self.df = self.add_macro_ratios(self.df)
         
+        # Protect target column before filtering
+        target_col = f"{target_ticker}_PX_LAST"
+        if target_col not in self.df.columns:
+            raise ValueError(f"Target column '{target_col}' not found")
+        target_data = self.df[[target_col]].copy()
+        self.df = self.df.drop(columns=[target_col])
+        
+        print("\nApplying automatic filters...")
+        initial_cols = len([c for c in self.df.columns if c != 'date'])
+        self.df = self._filter_by_nulls(self.df, threshold=0.5)
+        self.df = self._filter_by_variance(self.df, threshold=0.001)
+        self.df = self._filter_by_correlation(self.df, threshold=0.95)
+        final_cols = len([c for c in self.df.columns if c != 'date'])
+        print(f"  Features: {initial_cols} → {final_cols} (removed {initial_cols - final_cols})")
+        
+        # Restore target column
+        self.df = pd.concat([self.df, target_data], axis=1)
+        
         if analyze:
             self.analyze(target_ticker, plot=True)
         
         print("\nCreating sequences...")
-        target_col = f"{target_ticker}_PX_LAST"
         self.X, self.y, self.feature_cols = self.create_sequences(self.df, target_col)
         
         print(f"\nDataset created:")
         print(f"  Input shape: {self.X.shape}")
         print(f"  Output shape: {self.y.shape}")
-        print(f"  Class distribution: {self.y.sum(axis=0)}")
+        if self.task_type == 'classification':
+            print(f"  Class distribution: {self.y.sum(axis=0).astype(int)}")
+        else:
+            print(f"  Target range: [{self.y.min():.2f}, {self.y.max():.2f}]")
+            print(f"  Target mean: {self.y.mean():.2f} ± {self.y.std():.2f}")
+        print(f"  Number of features: {len(self.feature_cols)}")
+        
+        # Feature selection: Top 50
+        self.X, self.feature_cols = self._select_top_features(self.X, self.y, self.feature_cols, top_n=50)
+        
+        # Apply oversampling (classification only)
+        self.X, self.y = self._apply_random_oversampling(self.X, self.y, task_type=self.task_type)
+        
+        print(f"\nFinal dataset:")
+        print(f"  Input shape: {self.X.shape}")
+        print(f"  Output shape: {self.y.shape}")
+        if self.task_type == 'classification':
+            print(f"  Class distribution: {self.y.sum(axis=0).astype(int)}")
+        else:
+            print(f"  Target range: [{self.y.min():.2f}, {self.y.max():.2f}]")
+            print(f"  Target mean: {self.y.mean():.2f} ± {self.y.std():.2f}")
         print(f"  Number of features: {len(self.feature_cols)}")
         
         if visualize:
@@ -288,11 +479,16 @@ class StockDatasetBuilder:
 
 
 if __name__ == "__main__":
-    return_bins = [-np.inf, -6.1, -3.8, -2.2, -1, -0.2, 0.64, 1.4, 2.3, 3.3, 4.6, 6.7, np.inf]
+    # Choose task: 'classification' or 'regression'
+    TASK_TYPE = 'classification'
+    
+    # Binary classification: DOWN vs UP (only for classification)
+    return_bins = [-np.inf, 0, np.inf] if TASK_TYPE == 'classification' else None
     
     builder = StockDatasetBuilder(
-        sequence_length=60,
+        sequence_length=30,
         horizon=10,
+        task_type=TASK_TYPE,
         return_bins=return_bins,
         start_date="2000-01-03",
         end_date="2025-11-20"

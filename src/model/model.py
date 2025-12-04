@@ -1,22 +1,20 @@
-"""CNN-BiLSTM model for stock prediction using PyTorch Lightning."""
-
 import torch
 import torch.nn as nn
 import lightning as L
-from torchmetrics import Accuracy, F1Score, ConfusionMatrix
+from torchmetrics import Accuracy, F1Score, ConfusionMatrix, MeanSquaredError, MeanAbsoluteError
 
 from src.model.config import ModelConfig
 
 
 class CNNBiLSTMModel(L.LightningModule):
-    """CNN-1D + BiLSTM model with attention for stock trend prediction."""
+    """CNN-1D + BiLSTM + Transformer model with attention for stock trend prediction."""
     
     def __init__(self, config: ModelConfig):
         super().__init__()
         self.save_hyperparameters(vars(config))
         self.config = config
         
-        # CNN layers
+        # 5 CNN layers with Batch Normalization
         self.conv1 = nn.Conv1d(
             in_channels=config.n_features,
             out_channels=config.cnn_filters_1,
@@ -24,7 +22,6 @@ class CNNBiLSTMModel(L.LightningModule):
             padding="same"
         )
         self.bn1 = nn.BatchNorm1d(config.cnn_filters_1)
-        self.dropout1 = nn.Dropout(config.cnn_dropout)
         
         self.conv2 = nn.Conv1d(
             in_channels=config.cnn_filters_1,
@@ -33,41 +30,103 @@ class CNNBiLSTMModel(L.LightningModule):
             padding="same"
         )
         self.bn2 = nn.BatchNorm1d(config.cnn_filters_2)
-        self.dropout2 = nn.Dropout(config.cnn_dropout)
         
-        # BiLSTM layer
+        self.conv3 = nn.Conv1d(
+            in_channels=config.cnn_filters_2,
+            out_channels=config.cnn_filters_3,
+            kernel_size=config.cnn_kernel_size,
+            padding="same"
+        )
+        self.bn3 = nn.BatchNorm1d(config.cnn_filters_3)
+        
+        self.conv4 = nn.Conv1d(
+            in_channels=config.cnn_filters_3,
+            out_channels=config.cnn_filters_4,
+            kernel_size=config.cnn_kernel_size,
+            padding="same"
+        )
+        self.bn4 = nn.BatchNorm1d(config.cnn_filters_4)
+        
+        self.conv5 = nn.Conv1d(
+            in_channels=config.cnn_filters_4,
+            out_channels=config.cnn_filters_5,
+            kernel_size=config.cnn_kernel_size,
+            padding="same"
+        )
+        self.bn5 = nn.BatchNorm1d(config.cnn_filters_5)
+        
+        self.cnn_dropout = nn.Dropout(config.cnn_dropout)
+        
+        # 3 BiLSTM bidirectional layers
         self.lstm = nn.LSTM(
-            input_size=config.cnn_filters_2,
+            input_size=config.cnn_filters_5,
             hidden_size=config.lstm_hidden_size,
             num_layers=config.lstm_num_layers,
             batch_first=True,
             bidirectional=True,
             dropout=config.lstm_dropout if config.lstm_num_layers > 1 else 0
         )
-        self.lstm_dropout = nn.Dropout(config.lstm_dropout)
         
-        # Attention mechanism
-        self.attention = nn.Linear(config.lstm_hidden_size * 2, 1)
+        # LSTM bidirectional output dimension
+        lstm_output_dim = config.lstm_hidden_size * 2
         
-        # Dense layers con BatchNorm
-        self.fc1 = nn.Linear(config.lstm_hidden_size * 2, config.dense_hidden)
-        self.bn_fc1 = nn.BatchNorm1d(config.dense_hidden)  # BatchNorm para estabilizar
-        self.fc1_dropout = nn.Dropout(config.dense_dropout)
+        # Transformer
+        self.use_transformer = config.use_transformer
+        if self.use_transformer:
+            encoder_layer = nn.TransformerEncoderLayer(
+                d_model=lstm_output_dim,
+                nhead=config.transformer_heads,
+                dim_feedforward=lstm_output_dim * 2,
+                dropout=config.lstm_dropout,
+                batch_first=True
+            )
+            self.transformer = nn.TransformerEncoder(
+                encoder_layer,
+                num_layers=config.transformer_layers
+            )
         
-        self.fc2 = nn.Linear(config.dense_hidden, config.n_classes)
+        # Attention layer
+        self.attention = nn.Linear(lstm_output_dim, 1)
         
-        # Loss function con class weights para balancear dataset
-        self.criterion = nn.CrossEntropyLoss(label_smoothing=0.1)  # Label smoothing anti-overfitting
+        # 4 Dense layers with Batch Normalization
+        self.fc1 = nn.Linear(lstm_output_dim, config.dense_hidden_1)
+        self.bn_fc1 = nn.BatchNorm1d(config.dense_hidden_1)
+        
+        self.fc2 = nn.Linear(config.dense_hidden_1, config.dense_hidden_2)
+        self.bn_fc2 = nn.BatchNorm1d(config.dense_hidden_2)
+        
+        self.fc3 = nn.Linear(config.dense_hidden_2, config.dense_hidden_3)
+        self.bn_fc3 = nn.BatchNorm1d(config.dense_hidden_3)
+        
+        # Output layer: 1 for regression, n_classes for classification
+        output_dim = 1 if config.task_type == 'regression' else config.n_classes
+        self.fc4 = nn.Linear(config.dense_hidden_3, output_dim)
+        
+        self.dense_dropout = nn.Dropout(config.dense_dropout)
+        
+        # Loss function
+        if config.task_type == 'classification':
+            self.criterion = nn.CrossEntropyLoss(label_smoothing=config.label_smoothing)
+        else:
+            self.criterion = nn.MSELoss()
         
         # Metrics
-        self.train_acc = Accuracy(task="multiclass", num_classes=config.n_classes)
-        self.val_acc = Accuracy(task="multiclass", num_classes=config.n_classes)
-        self.test_acc = Accuracy(task="multiclass", num_classes=config.n_classes)
-        
-        self.val_f1 = F1Score(task="multiclass", num_classes=config.n_classes, average="weighted")
-        self.test_f1 = F1Score(task="multiclass", num_classes=config.n_classes, average="weighted")
-        
-        self.test_confusion = ConfusionMatrix(task="multiclass", num_classes=config.n_classes)
+        if config.task_type == 'classification':
+            self.train_acc = Accuracy(task="multiclass", num_classes=config.n_classes)
+            self.val_acc = Accuracy(task="multiclass", num_classes=config.n_classes)
+            self.test_acc = Accuracy(task="multiclass", num_classes=config.n_classes)
+            
+            self.val_f1 = F1Score(task="multiclass", num_classes=config.n_classes, average="weighted")
+            self.test_f1 = F1Score(task="multiclass", num_classes=config.n_classes, average="weighted")
+            
+            self.test_confusion = ConfusionMatrix(task="multiclass", num_classes=config.n_classes)
+        else:
+            self.train_mse = MeanSquaredError()
+            self.train_mae = MeanAbsoluteError()
+            self.val_mse = MeanSquaredError()
+            self.val_mae = MeanAbsoluteError()
+            self.test_mse = MeanSquaredError()
+            self.test_mae = MeanAbsoluteError()
         
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -79,142 +138,193 @@ class CNNBiLSTMModel(L.LightningModule):
         Returns:
             Logits (batch_size, n_classes)
         """
-        batch_size = x.size(0)
+        x = x.transpose(1, 2)
+
+        x = torch.relu(self.bn1(self.conv1(x)))
+        x = self.cnn_dropout(x)
         
-        # CNN expects (batch, channels, seq_len)
-        x = x.transpose(1, 2)  # (batch, n_features, seq_len)
+        x = torch.relu(self.bn2(self.conv2(x)))
+        x = self.cnn_dropout(x)
         
-        # CNN block 1
-        x = self.conv1(x)
-        x = self.bn1(x)
-        x = torch.relu(x)
-        x = self.dropout1(x)
+        x = torch.relu(self.bn3(self.conv3(x)))
+        x = self.cnn_dropout(x)
         
-        # CNN block 2
-        x = self.conv2(x)
-        x = self.bn2(x)
-        x = torch.relu(x)
-        x = self.dropout2(x)
+        x = torch.relu(self.bn4(self.conv4(x)))
+        x = self.cnn_dropout(x)
         
-        # BiLSTM expects (batch, seq_len, features)
-        x = x.transpose(1, 2)  # (batch, seq_len, cnn_filters_2)
+        x = torch.relu(self.bn5(self.conv5(x)))
+        x = self.cnn_dropout(x)
         
-        # BiLSTM
-        lstm_out, _ = self.lstm(x)  # (batch, seq_len, lstm_hidden*2)
-        lstm_out = self.lstm_dropout(lstm_out)
+        x = x.transpose(1, 2)
         
-        # Attention mechanism
-        attention_weights = torch.softmax(
-            self.attention(lstm_out).squeeze(-1), dim=1
-        )  # (batch, seq_len)
+        lstm_out, _ = self.lstm(x)
         
-        # Apply attention
-        context = torch.sum(
-            lstm_out * attention_weights.unsqueeze(-1), dim=1
-        )  # (batch, lstm_hidden*2)
+        if self.use_transformer:
+            lstm_out = self.transformer(lstm_out)
         
-        # Dense layers con BatchNorm
-        x = self.fc1(context)
-        x = self.bn_fc1(x)  # BatchNorm antes de activación
-        x = torch.relu(x)
-        x = self.fc1_dropout(x)
+        attention_weights = torch.softmax(self.attention(lstm_out), dim=1)
+        attended = torch.sum(attention_weights * lstm_out, dim=1)
         
-        logits = self.fc2(x)  # (batch, n_classes)
+        x = torch.relu(self.bn_fc1(self.fc1(attended)))
+        x = self.dense_dropout(x)
+        
+        x = torch.relu(self.bn_fc2(self.fc2(x)))
+        x = self.dense_dropout(x)
+        
+        x = torch.relu(self.bn_fc3(self.fc3(x)))
+        x = self.dense_dropout(x)
+        
+        logits = self.fc4(x)
         
         return logits
     
-    def training_step(self, batch: tuple[torch.Tensor, torch.Tensor], batch_idx: int) -> torch.Tensor:
+    def training_step(self, batch, batch_idx):
         """Training step."""
         x, y = batch
-        logits = self(x)
+        outputs = self(x)
         
-        # Convert one-hot to class indices
-        y_indices = torch.argmax(y, dim=1)
-        
-        loss = self.criterion(logits, y_indices)
-        
-        # Metrics
-        preds = torch.argmax(logits, dim=1)
-        acc = self.train_acc(preds, y_indices)
-        
-        # Logging
-        self.log("train_loss", loss, on_step=False, on_epoch=True, prog_bar=True)
-        self.log("train_acc", acc, on_step=False, on_epoch=True, prog_bar=True)
+        if self.config.task_type == 'classification':
+            # Classification
+            if y.dim() > 1 and y.size(1) > 1:
+                y = torch.argmax(y, dim=1)
+            
+            loss = self.criterion(outputs, y)
+            preds = torch.argmax(outputs, dim=1)
+            self.train_acc(preds, y)
+            
+            self.log('train_loss', loss, on_step=False, on_epoch=True, prog_bar=True)
+            self.log('train_acc', self.train_acc, on_step=False, on_epoch=True, prog_bar=True)
+        else:
+            # Regression
+            if y.dim() > 1 and y.size(1) == 1:
+                y = y.squeeze(1)
+            outputs = outputs.squeeze(1)
+            
+            loss = self.criterion(outputs, y)
+            self.train_mse(outputs, y)
+            self.train_mae(outputs, y)
+            
+            self.log('train_loss', loss, on_step=False, on_epoch=True, prog_bar=True)
+            self.log('train_mse', self.train_mse, on_step=False, on_epoch=True, prog_bar=False)
+            self.log('train_mae', self.train_mae, on_step=False, on_epoch=True, prog_bar=True)
         
         return loss
     
-    def validation_step(self, batch: tuple[torch.Tensor, torch.Tensor], batch_idx: int):
+    def validation_step(self, batch, batch_idx):
         """Validation step."""
         x, y = batch
-        logits = self(x)
+        outputs = self(x)
         
-        y_indices = torch.argmax(y, dim=1)
-        loss = self.criterion(logits, y_indices)
-        
-        preds = torch.argmax(logits, dim=1)
-        acc = self.val_acc(preds, y_indices)
-        f1 = self.val_f1(preds, y_indices)
-        
-        self.log("val_loss", loss, on_step=False, on_epoch=True, prog_bar=True)
-        self.log("val_acc", acc, on_step=False, on_epoch=True, prog_bar=True)
-        self.log("val_f1", f1, on_step=False, on_epoch=True, prog_bar=True)
-        
-    def test_step(self, batch: tuple[torch.Tensor, torch.Tensor], batch_idx: int):
+        if self.config.task_type == 'classification':
+            # Classification
+            if y.dim() > 1 and y.size(1) > 1:
+                y = torch.argmax(y, dim=1)
+            
+            loss = self.criterion(outputs, y)
+            preds = torch.argmax(outputs, dim=1)
+            self.val_acc(preds, y)
+            self.val_f1(preds, y)
+            
+            self.log('val_loss', loss, on_step=False, on_epoch=True, prog_bar=True)
+            self.log('val_acc', self.val_acc, on_step=False, on_epoch=True, prog_bar=True)
+            self.log('val_f1', self.val_f1, on_step=False, on_epoch=True, prog_bar=False)
+        else:
+            # Regression
+            if y.dim() > 1 and y.size(1) == 1:
+                y = y.squeeze(1)
+            outputs = outputs.squeeze(1)
+            
+            loss = self.criterion(outputs, y)
+            self.val_mse(outputs, y)
+            self.val_mae(outputs, y)
+            
+            self.log('val_loss', loss, on_step=False, on_epoch=True, prog_bar=True)
+            self.log('val_mse', self.val_mse, on_step=False, on_epoch=True, prog_bar=False)
+            self.log('val_mae', self.val_mae, on_step=False, on_epoch=True, prog_bar=True)
+    
+    def test_step(self, batch, batch_idx):
         """Test step."""
         x, y = batch
-        logits = self(x)
+        outputs = self(x)
         
-        y_indices = torch.argmax(y, dim=1)
-        loss = self.criterion(logits, y_indices)
-        
-        preds = torch.argmax(logits, dim=1)
-        acc = self.test_acc(preds, y_indices)
-        f1 = self.test_f1(preds, y_indices)
-        self.test_confusion.update(preds, y_indices)
-        
-        self.log("test_loss", loss, on_step=False, on_epoch=True)
-        self.log("test_acc", acc, on_step=False, on_epoch=True)
-        self.log("test_f1", f1, on_step=False, on_epoch=True)
-        
-    def predict_step(self, batch: tuple[torch.Tensor, torch.Tensor], batch_idx: int) -> dict:
+        if self.config.task_type == 'classification':
+            # Classification
+            if y.dim() > 1 and y.size(1) > 1:
+                y = torch.argmax(y, dim=1)
+            
+            loss = self.criterion(outputs, y)
+            preds = torch.argmax(outputs, dim=1)
+            self.test_acc(preds, y)
+            self.test_f1(preds, y)
+            self.test_confusion.update(preds, y)
+            
+            self.log('test_loss', loss, on_step=False, on_epoch=True)
+            self.log('test_acc', self.test_acc, on_step=False, on_epoch=True)
+            self.log('test_f1', self.test_f1, on_step=False, on_epoch=True)
+        else:
+            # Regression
+            if y.dim() > 1 and y.size(1) == 1:
+                y = y.squeeze(1)
+            outputs = outputs.squeeze(1)
+            
+            loss = self.criterion(outputs, y)
+            self.test_mse(outputs, y)
+            self.test_mae(outputs, y)
+            
+            self.log('test_loss', loss, on_step=False, on_epoch=True)
+            self.log('test_mse', self.test_mse, on_step=False, on_epoch=True)
+            self.log('test_mae', self.test_mae, on_step=False, on_epoch=True)
+    
+    def predict_step(self, batch, batch_idx):
         """Prediction step."""
         x, y = batch
-        logits = self(x)
-        probs = torch.softmax(logits, dim=1)
-        preds = torch.argmax(logits, dim=1)
-        y_true = torch.argmax(y, dim=1)
+        outputs = self(x)
         
-        return {
-            "predictions": preds,
-            "probabilities": probs,
-            "ground_truth": y_true
-        }
+        if self.config.task_type == 'classification':
+            # Classification
+            probs = torch.softmax(outputs, dim=1)
+            preds = torch.argmax(outputs, dim=1)
+            
+            if y.dim() > 1 and y.size(1) > 1:
+                y = torch.argmax(y, dim=1)
+            
+            return {
+                "predictions": preds,
+                "probabilities": probs,
+                "ground_truth": y
+            }
+        else:
+            # Regression
+            if y.dim() > 1 and y.size(1) == 1:
+                y = y.squeeze(1)
+            outputs = outputs.squeeze(1)
+            
+            return {
+                "predictions": outputs,
+                "ground_truth": y
+            }
     
     def configure_optimizers(self):
-        """Configure optimizer and learning rate scheduler."""
+        """Configurar optimizador y scheduler."""
         optimizer = torch.optim.AdamW(
             self.parameters(),
             lr=self.config.learning_rate,
-            weight_decay=self.config.weight_decay,
-            betas=(0.9, 0.999),
-            eps=1e-8
+            weight_decay=self.config.weight_decay
         )
         
-        # Cosine Annealing con Warmup - mejor que ReduceLROnPlateau
-        from torch.optim.lr_scheduler import CosineAnnealingWarmRestarts
-        
-        scheduler = CosineAnnealingWarmRestarts(
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
             optimizer,
-            T_0=10,      # Restart cada 10 épocas
-            T_mult=2,    # Duplicar periodo cada restart
-            eta_min=1e-6 # LR mínimo
+            mode='min',
+            factor=0.5,
+            patience=5,
         )
         
         return {
-            "optimizer": optimizer,
-            "lr_scheduler": {
-                "scheduler": scheduler,
-                "interval": "epoch",
-                "frequency": 1
+            'optimizer': optimizer,
+            'lr_scheduler': {
+                'scheduler': scheduler,
+                'monitor': 'val_loss',
+                'interval': 'epoch',
+                'frequency': 1
             }
         }

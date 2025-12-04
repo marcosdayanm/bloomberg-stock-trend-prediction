@@ -1,5 +1,3 @@
-"""Utility functions for model evaluation and visualization."""
-
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
@@ -8,6 +6,10 @@ from pathlib import Path
 from torchmetrics import ConfusionMatrix
 
 from src.model.model import CNNBiLSTMModel
+from src.model.config import ModelConfig
+
+import torch
+import inspect
 from src.model.config import ModelConfig
 
 
@@ -35,15 +37,21 @@ def get_most_optimal_device():
 def load_model(checkpoint_path: str | Path) -> CNNBiLSTMModel:
     """
     Load trained model from checkpoint.
-    
-    Args:
-        checkpoint_path: Path to checkpoint file
-        
-    Returns:
-        Loaded model
     """
-    model = CNNBiLSTMModel.load_from_checkpoint(checkpoint_path)
+    
+    # Load checkpoint
+    checkpoint = torch.load(checkpoint_path, map_location='cpu', weights_only=False)
+
+    hparams = checkpoint.get('hyper_parameters', {})
+    valid_params = set(inspect.signature(ModelConfig.__init__).parameters.keys()) - {'self'}
+    filtered_hparams = {k: v for k, v in hparams.items() if k in valid_params}
+    
+    config = ModelConfig(**filtered_hparams)
+    model = CNNBiLSTMModel(config)
+
+    model.load_state_dict(checkpoint['state_dict'], strict=False)
     model.eval()
+    
     return model
 
 
@@ -54,22 +62,13 @@ def predict_sample(
 ) -> dict:
     """
     Make prediction for a single sample.
-    
-    Args:
-        model: Trained model
-        X: Input sequence (seq_length, n_features) or (1, seq_length, n_features)
-        return_bins: Bin edges for interpreting predictions
-        
-    Returns:
-        Dictionary with prediction results
     """
     if return_bins is None:
         return_bins = [-np.inf, -6.11, -3.81, -2.22, -1.05, -0.20, 0.64, 
                        1.42, 2.25, 3.31, 4.60, 6.71, np.inf]
     
-    # Ensure correct shape
     if X.ndim == 2:
-        X = X[np.newaxis, :]  # Add batch dimension
+        X = X[np.newaxis, :]
     
     # Convert to tensor
     X_tensor = torch.FloatTensor(X)
@@ -102,12 +101,6 @@ def plot_confusion_matrix(
 ):
     """
     Plot confusion matrix.
-    
-    Args:
-        y_true: Ground truth labels (class indices)
-        y_pred: Predicted labels (class indices)
-        return_bins: Bin edges for labels
-        save_path: Path to save plot
     """
     if return_bins is None:
         return_bins = [-np.inf, -6.11, -3.81, -2.22, -1.05, -0.20, 0.64, 
@@ -125,7 +118,6 @@ def plot_confusion_matrix(
         else:
             labels.append(f"{start:.1f}% to {end:.1f}%")
     
-    # Compute confusion matrix
     cm_metric = ConfusionMatrix(task="multiclass", num_classes=len(labels))
     cm = cm_metric(torch.tensor(y_pred), torch.tensor(y_true)).numpy()
     
@@ -164,16 +156,9 @@ def plot_prediction_distribution(
 ):
     """
     Plot distribution of predictions vs ground truth.
-    
-    Args:
-        y_true: Ground truth labels (class indices)
-        y_pred: Predicted labels (class indices)
-        return_bins: Bin edges for labels
-        save_path: Path to save plot
     """
     if return_bins is None:
-        return_bins = [-np.inf, -6.11, -3.81, -2.22, -1.05, -0.20, 0.64, 
-                       1.42, 2.25, 3.31, 4.60, 6.71, np.inf]
+        return_bins = [-np.inf, 0, np.inf]
     
     # Count distributions
     true_counts = np.bincount(y_true, minlength=len(return_bins) - 1)
@@ -219,20 +204,9 @@ def evaluate_model(
 ) -> dict:
     """
     Comprehensive model evaluation.
-    
-    Args:
-        model: Trained model
-        X_test: Test inputs
-        y_test: Test labels (one-hot encoded)
-        return_bins: Bin edges for interpretation
-        save_dir: Directory to save plots
-        
-    Returns:
-        Dictionary with evaluation metrics
     """
     if return_bins is None:
-        return_bins = [-np.inf, -6.11, -3.81, -2.22, -1.05, -0.20, 0.64, 
-                       1.42, 2.25, 3.31, 4.60, 6.71, np.inf]
+        return_bins = [-np.inf, 0, np.inf]
     
     if save_dir:
         save_dir = Path(save_dir)
@@ -240,7 +214,11 @@ def evaluate_model(
     
     # Convert to tensors
     X_tensor = torch.FloatTensor(X_test)
-    y_indices = np.argmax(y_test, axis=1)
+    
+    if y_test.ndim > 1 and y_test.shape[1] > 1:
+        y_indices = np.argmax(y_test, axis=1)
+    else:
+        y_indices = y_test.flatten()
     
     # Predict
     model.eval()

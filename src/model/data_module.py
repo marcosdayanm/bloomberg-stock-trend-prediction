@@ -1,5 +1,3 @@
-"""Lightning DataModule for stock prediction."""
-
 import numpy as np
 import lightning as L
 from pathlib import Path
@@ -30,11 +28,13 @@ class StockDataModule(L.LightningDataModule):
         
     def prepare_data(self):
         """Load and split data into train/val/test/local test sets."""
-        # Load full dataset
-        X = np.load(self.data_dir / "msft_10day_prediction_X.npy")
-        y = np.load(self.data_dir / "msft_10day_prediction_y.npy")
+        # Load from task-specific directory
+        task_data_dir = self.data_dir / self.config.task_type
+        X = np.load(task_data_dir / "msft_10day_prediction_X.npy")
+        y = np.load(task_data_dir / "msft_10day_prediction_y.npy")
         
-        print(f"\nDataset loaded: X {X.shape}, y {y.shape}")
+        print(f"\nDataset loaded from: {task_data_dir}")
+        print(f"   X {X.shape}, y {y.shape}")
         
         # Reserve last samples for local testing
         n_local = self.config.local_test_samples

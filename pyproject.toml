@@ -17,4 +17,6 @@ dependencies = [
     "torchmetrics>=1.8.2",
     "tensorboard>=2.20.0",
     "rich>=14.2.0",
+    "scikit-learn>=1.7.2",
+    "imbalanced-learn>=0.14.0",
 ]
