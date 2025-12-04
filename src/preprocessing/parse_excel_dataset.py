@@ -8,13 +8,6 @@ class BloombergExcelParser:
     """Parse Bloomberg Excel datasets into clean CSV format."""
     
     def __init__(self, header_row: int = 4, search_start_col: int = 3):
-        """
-        Initialize the parser.
-        
-        Args:
-            header_row: Row index where headers are located
-            search_start_col: Column index to start searching for data
-        """
         self.header_row = header_row
         self.search_start_col = search_start_col
     
@@ -113,12 +106,6 @@ class DatasetCombiner:
     """Combine multiple CSV files into a single dataset."""
     
     def __init__(self, datasets_dir: Path = CRUDE_DATASETS_DIR):
-        """
-        Initialize the combiner.
-        
-        Args:
-            datasets_dir: Directory containing CSV files
-        """
         self.datasets_dir = datasets_dir
     
     def get_latest_excel(self) -> Path:
@@ -132,15 +119,6 @@ class DatasetCombiner:
         return all_files[0]
     
     def combine_csvs(self, output_name: str = "CRUDE") -> Path:
-        """
-        Combine all CSV files into a single dataset with prefixed columns.
-        
-        Args:
-            output_name: Name for the combined CSV file
-        
-        Returns:
-            Path to the created combined CSV
-        """
         all_csv_files = list(self.datasets_dir.glob("*.csv"))
 
         if not all_csv_files:

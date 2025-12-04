@@ -6,12 +6,11 @@ from pathlib import Path
 class ModelConfig:
     """Model architecture configuration."""
 
-    task_type: str = 'regression'  # 'classification' | 'regression'
+    task_type: str = 'classification'  # 'classification' | 'regression'
     
-    # Input dimensions
-    sequence_length: int = 30
+    sequence_length: int = 120
     n_features: int = 50
-    n_classes: int = 2  # Only used for classification
+    n_classes: int = 2
     
     # CNN layers
     cnn_filters_1: int = 128

@@ -72,16 +72,15 @@ def run_preprocessing(
 
 
 if __name__ == "__main__":
-    TASK_TYPE = 'regression'  # regression | classification
+    TASK_TYPE = 'classification'  # regression | classification
     
-    # Binary classification bins (only used if task_type='classification')
     binary_bins = [-np.inf, 0, np.inf]
     start_date = "2000-01-03"
     end_date = "2025-11-20"
 
     X, y = run_preprocessing(
         target_ticker="MSFT",
-        sequence_length=30,
+        sequence_length=120,
         horizon=10,
         task_type=TASK_TYPE,
         return_bins=binary_bins if TASK_TYPE == 'classification' else None,
@@ -90,4 +89,5 @@ if __name__ == "__main__":
         skip_excel_parsing=False,
         analyze_features=False,
         analyze_data=True,
+        feature_columns=None,
     )

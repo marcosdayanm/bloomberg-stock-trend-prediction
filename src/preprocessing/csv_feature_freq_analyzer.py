@@ -24,12 +24,6 @@ class FeatureFrequencyAnalyzer:
     """Analyze feature frequencies and quality metrics in time series datasets."""
     
     def __init__(self, date_col: str = "date"):
-        """
-        Initialize the analyzer.
-        
-        Args:
-            date_col: Name of the date column in CSV files
-        """
         self.date_col = date_col
         self.metrics: dict[str, list[FeatureMetrics]] = {}
     

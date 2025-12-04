@@ -23,12 +23,6 @@ class StockDatasetBuilder:
         end_date: str = "2025-11-20",
         feature_columns: list[str] | None = None,
     ):
-        """Initialize the dataset builder.
-        
-        Args:
-            task_type: 'classification' or 'regression'
-            return_bins: Bins for classification (ignored for regression)
-        """
         self.sequence_length = sequence_length
         self.horizon = horizon
         self.task_type = task_type
@@ -91,17 +85,14 @@ class StockDatasetBuilder:
         """Select top N features by mutual information."""
         print(f"\nSelecting top {top_n} features...")
         
-        # Flatten sequences for feature selection
         X_flat = X.reshape(X.shape[0], -1)
-        
-        # Convert y to labels for mutual information
         if y.ndim > 1 and y.shape[1] > 1:
-            y_labels = np.argmax(y, axis=1)  # Classification
+            # Classification
+            y_labels = np.argmax(y, axis=1)
         else:
-            # Regression: bin continuous values for mutual information
+            # Regression
             y_labels = pd.cut(y.ravel(), bins=10, labels=False)
         
-        # Calculate importance per timestep
         n_timesteps = X.shape[1]
         feature_importance = np.zeros(len(feature_cols))
         
@@ -110,14 +101,11 @@ class StockDatasetBuilder:
             end_idx = start_idx + len(feature_cols)
             X_timestep = X_flat[:, start_idx:end_idx]
             
-            # Mutual information
             mi_scores = mutual_info_classif(X_timestep, y_labels, random_state=42)
             feature_importance += mi_scores
         
-        # Average importance across timesteps
         feature_importance /= n_timesteps
         
-        # Select top N
         top_indices = np.argsort(feature_importance)[-top_n:]
         top_features = [feature_cols[i] for i in top_indices]
         
@@ -125,8 +113,7 @@ class StockDatasetBuilder:
         
         print(f"  Selected features: {len(top_features)}")
         print(f"  Shape: {X.shape} → {X_selected.shape}")
-        
-        # Show top 10 most important
+
         sorted_idx = np.argsort(feature_importance)[-10:][::-1]
         print("\n  Top 10 most important features:")
         for i, idx in enumerate(sorted_idx, 1):
@@ -144,23 +131,16 @@ class StockDatasetBuilder:
         print("\nApplying random oversampling...")
         print(f"  Original class distribution: {y.sum(axis=0).astype(int)}")
         
-        # Reshape for oversampling
         n_samples, n_timesteps, n_features = X.shape
         X_flat = X.reshape(n_samples, -1)
-        
-        # Convert one-hot to labels for oversampling
         y_labels = np.argmax(y, axis=1)
-        
-        # Oversample
+
         ros = RandomOverSampler(random_state=42)
         X_resampled, y_labels_resampled = ros.fit_resample(X_flat, y_labels)
         
-        # Convert back to one-hot
         n_classes = y.shape[1]
         y_resampled = np.zeros((len(y_labels_resampled), n_classes))
         y_resampled[np.arange(len(y_labels_resampled)), y_labels_resampled] = 1
-        
-        # Reshape back
         X_resampled = X_resampled.reshape(-1, n_timesteps, n_features)
         
         print(f"  New class distribution: {y_resampled.sum(axis=0).astype(int)}")
@@ -194,8 +174,9 @@ class StockDatasetBuilder:
         trading_days = self.get_us_trading_days(self.start_date, self.end_date)
         df = df[df['date'].isin(trading_days)].reset_index(drop=True)
         
-        # Clean column names: remove CRUDE from all feature names
+        # remove CRUDE from column names
         df.columns = [col.replace('_CRUDE', '').replace('CRUDE_', '') for col in df.columns]
+        df = df.loc[:, ~df.columns.duplicated(keep='first')]
         
         return df
     
@@ -265,14 +246,12 @@ class StockDatasetBuilder:
         exclude_cols = ['date', 'label'] + [col for col in df.columns if col.startswith('label_')]
         feature_cols = [col for col in df.columns if col not in exclude_cols and df[col].dtype in [np.float64, np.int64]]
         
-        # Apply feature selection if specified
         if self.feature_columns is not None:
             selected_features = []
             for pattern in self.feature_columns:
                 matched = [col for col in feature_cols if fnmatch(col, pattern)]
                 selected_features.extend(matched)
             
-            # Remove duplicates while preserving order
             feature_cols = list(dict.fromkeys(selected_features))
             
             if len(feature_cols) == 0:
@@ -315,7 +294,7 @@ class StockDatasetBuilder:
         X = np.array(X)
         y = np.array(y)
         if self.task_type == 'regression':
-            y = y.reshape(-1, 1)  # Shape: (samples, 1)
+            y = y.reshape(-1, 1)
         
         return X, y, feature_cols
     
@@ -365,7 +344,6 @@ class StockDatasetBuilder:
                 f.write(f"{i}: {feat}\n")
         print(f"  Feature names saved to: {feature_list_path}")
         
-        # Optionally save full DataFrame
         if save_csv and self.df is not None:
             csv_dir = DATASETS_DIR / "csv"
             csv_dir.mkdir(parents=True, exist_ok=True)
@@ -375,10 +353,6 @@ class StockDatasetBuilder:
     def analyze(self, target_ticker: str, plot: bool = True) -> None:
         """
         Analyze the processed dataset before creating sequences.
-        
-        Args:
-            target_ticker: Ticker symbol to analyze
-            plot: Whether to generate distribution plots
         """
         if self.df is None:
             raise ValueError("No dataset loaded. Run build() first or load data manually.")
@@ -394,17 +368,6 @@ class StockDatasetBuilder:
             analyzer.plot_quarterly_fundamentals(plot_dir)
     
     def build(self, target_ticker: str, visualize: bool = False, analyze: bool = False) -> tuple[np.ndarray, np.ndarray]:
-        """
-        Build the complete dataset pipeline.
-        
-        Args:
-            target_ticker: Ticker symbol to predict (e.g., 'MSFT', 'AAPL', 'GOOG')
-            visualize: Whether to show sample visualizations
-            analyze: Whether to run statistical analysis on the dataset
-        
-        Returns:
-            X, y arrays
-        """
         print("Loading and merging datasets...")
         self.df = self.load_and_merge_datasets()
         
@@ -480,7 +443,7 @@ class StockDatasetBuilder:
 
 if __name__ == "__main__":
     # Choose task: 'classification' or 'regression'
-    TASK_TYPE = 'regression'
+    TASK_TYPE = 'classification'
     
     # Binary classification: DOWN vs UP (only for classification)
     return_bins = [-np.inf, 0, np.inf] if TASK_TYPE == 'classification' else None

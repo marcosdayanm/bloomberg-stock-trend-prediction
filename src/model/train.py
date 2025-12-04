@@ -11,6 +11,7 @@ from src.model.config import ModelConfig
 from src.model.data_module import StockDataModule
 from src.model.model import CNNBiLSTMModel
 from src.model.utils import get_most_optimal_device
+from src.model.callbacks import OverfittingDetector
 import torch
 from pathlib import PosixPath, WindowsPath
 
@@ -98,6 +99,15 @@ def train():
     )
     
     lr_monitor = LearningRateMonitor(logging_interval="epoch")
+
+    overfitting_detector = OverfittingDetector(
+        monitor_train="train_acc",
+        monitor_val="val_acc",
+        threshold=0.08,
+        factor=0.5,
+        patience=3,
+        verbose=True
+    )
     
     # Logger
     logger = TensorBoardLogger(
@@ -116,6 +126,7 @@ def train():
             best_checkpoint,
             milestone_checkpoint,
             early_stop_callback,
+            overfitting_detector,
             lr_monitor,
             RichProgressBar()
         ],

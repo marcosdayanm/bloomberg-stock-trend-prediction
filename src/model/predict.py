@@ -7,11 +7,11 @@ from src.model.model import CNNBiLSTMModel
 from pathlib import PosixPath, WindowsPath
 from torch.utils.data import DataLoader, TensorDataset
 
-BEST_MODEL = "pretrained_models/best_model_v2.1.ckpt"
 
-# Datos custom (None = usar datos default del data_module)
-CUSTOM_X_PATH = 'datasets/npy/local_test_X.npy'  # Ejemplo: "datasets/npy/test_X.npy"
-CUSTOM_Y_PATH = 'datasets/npy/local_test_y.npy'  # Ejemplo: "datasets/npy/test_y.npy"
+MODEL = "pretrained_models/best_model_v2.1.ckpt"
+
+X_PATH = 'datasets/npy/test_X.npy' 
+Y_PATH = 'datasets/npy/test_y.npy'
 
 
 
@@ -38,11 +38,11 @@ def load_custom_data(x_path: str, y_path: str):
 
 def main():
     print("\n" + "="*80)
-    print("QUICK PREDICT - Best Model v2.1")
+    print("PREDICT")
     print("="*80 + "\n")
 
     config = ModelConfig()
-    checkpoint_path = Path(BEST_MODEL)
+    checkpoint_path = Path(MODEL)
     
     print(f"Loading: {checkpoint_path.name}")
     print(f"Task: {config.task_type.upper()}\n")
@@ -59,8 +59,8 @@ def main():
     print(f"Model loaded ({sum(p.numel() for p in model.parameters()):,} parameters)\n")
     
 
-    if CUSTOM_X_PATH and CUSTOM_Y_PATH:
-        local_dataloader = load_custom_data(CUSTOM_X_PATH, CUSTOM_Y_PATH)
+    if X_PATH and Y_PATH:
+        local_dataloader = load_custom_data(X_PATH, Y_PATH)
     else:
         from src.model.data_module import StockDataModule
         data_module = StockDataModule(config, pin_memory=False)
@@ -79,6 +79,8 @@ def main():
     sample_num = 1  # Counter outside batch loop
     
     with torch.no_grad():
+        total = 0
+        good = 0
         for batch in local_dataloader:
             x, y = batch
             x = x.to(device)
@@ -91,7 +93,7 @@ def main():
                 
                 y_true = torch.argmax(y, dim=1) if y.dim() > 1 else y
                 
-                class_names = ['DOWN (<0%)', 'UP (≥0%)']
+                class_names = ['DOWN (<0%)', 'UP (>=0%)']
                 
                 for i in range(len(preds)):
                     pred = preds[i].item()
@@ -99,6 +101,9 @@ def main():
                     conf = probs[i, pred].item()
                     
                     result = "✓" if pred == true else "✗"
+                    if pred == true:
+                        good += 1
+                    total += 1
                     
                     print(f"Sample {sample_num}: {result}")
                     sample_num += 1
@@ -123,9 +128,11 @@ def main():
                     print(f"  Error: {error:.2f}%")
                     print()
     
-    print("="*80)
-    print("Done! Use load_and_predict.py for full evaluation.")
     print("="*80 + "\n")
+
+    if config.task_type == 'classification':
+        accuracy = good / total if total > 0 else 0
+        print(f"Accuracy: {accuracy:.2%} ({good}/{total})\n")
 
 
 if __name__ == "__main__":

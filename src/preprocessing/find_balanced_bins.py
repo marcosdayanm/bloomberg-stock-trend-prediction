@@ -15,19 +15,6 @@ def find_balanced_bins(
     start_date: str = "2000-01-03",
     end_date: str = "2025-11-20"
 ) -> list[float]:
-    """
-    Find balanced bins using quantile-based approach.
-    
-    Args:
-        target_ticker: Stock ticker
-        horizon: Forward return horizon in days
-        n_bins: Number of bins (will create n_bins-1 edges + inf edges)
-        start_date: Start date for data
-        end_date: End date for data
-    
-    Returns:
-        List of bin edges including -inf and inf
-    """
     print(f"Finding balanced bins for {target_ticker} ({horizon}-day returns)...\n")
     
     # Load data

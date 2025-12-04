@@ -129,14 +129,9 @@ class CNNBiLSTMModel(L.LightningModule):
             self.test_mae = MeanAbsoluteError()
         
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        Forward pass.
-        
-        Args:
-            x: Input tensor (batch_size, seq_length, n_features)
-            
-        Returns:
-            Logits (batch_size, n_classes)
+        """        
+        Args: x: Input tensor (batch_size, seq_length, n_features)
+        -> Logits (batch_size, n_classes)
         """
         x = x.transpose(1, 2)
 

@@ -8,12 +8,7 @@ class StockDataset(Dataset):
     
     def __init__(self, X: np.ndarray, y: np.ndarray):
         """
-        Initialize dataset.
-        
-        Args:
-            X: Input sequences (n_samples, seq_length, n_features)
-            y: One-hot encoded labels (n_samples, n_classes)
-        """
+        Initialize datast"""
         self.X = torch.FloatTensor(X)
         self.y = torch.FloatTensor(y)
         

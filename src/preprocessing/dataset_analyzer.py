@@ -12,12 +12,7 @@ class DatasetAnalyzer:
     """Analyze stock datasets to understand distributions, correlations, and patterns."""
     
     def __init__(self, df: pd.DataFrame, target_ticker: str):
-        """
-        Initialize analyzer with processed dataset.
-        
-        Args:
-            df: DataFrame with features and date column
-            target_ticker: Target stock ticker (e.g., 'MSFT')
+        """Initialize analyzer with processed dataset.
         """
         self.df = df.copy()
         self.target_ticker = target_ticker
