@@ -87,7 +87,7 @@ if __name__ == "__main__":
         return_bins=binary_bins if TASK_TYPE == 'classification' else None,
         start_date=start_date,
         end_date=end_date,
-        skip_excel_parsing=True,
+        skip_excel_parsing=False,
         analyze_features=False,
         analyze_data=True,
     )
