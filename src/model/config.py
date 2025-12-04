@@ -6,7 +6,7 @@ from pathlib import Path
 class ModelConfig:
     """Model architecture configuration."""
 
-    task_type: str = 'classification'  # 'classification' | 'regression'
+    task_type: str = 'regression'  # 'classification' | 'regression'
     
     # Input dimensions
     sequence_length: int = 30

@@ -72,7 +72,7 @@ def run_preprocessing(
 
 
 if __name__ == "__main__":
-    TASK_TYPE = 'classification'  # Change to 'regression' for regression task
+    TASK_TYPE = 'regression'  # regression | classification
     
     # Binary classification bins (only used if task_type='classification')
     binary_bins = [-np.inf, 0, np.inf]

@@ -480,7 +480,7 @@ class StockDatasetBuilder:
 
 if __name__ == "__main__":
     # Choose task: 'classification' or 'regression'
-    TASK_TYPE = 'classification'
+    TASK_TYPE = 'regression'
     
     # Binary classification: DOWN vs UP (only for classification)
     return_bins = [-np.inf, 0, np.inf] if TASK_TYPE == 'classification' else None
